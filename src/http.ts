@@ -2,6 +2,13 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { createMcpServer } from './server.js';
 import { logger } from './utils/logger.js';
 import { requestContext, freshNavigationState } from './utils/request-context.js';
+import { verifyS2sHeader, S2S_HEADER } from './s2s-verify.js';
+
+// Conduit service-to-service auth (gateway#377 parity). Non-empty =
+// enforce X-Gateway-S2S on every /mcp request; empty = disabled, behavior
+// exactly as before (dark-by-default until the gateway provisions this
+// container's derived subkey). See src/s2s-verify.ts.
+const S2S_SECRET = process.env.CONDUIT_S2S_SECRET || '';
 
 export async function handleHttpRequest(req: Request): Promise<Response> {
   // Unauthenticated shallow health check for the Azure liveness probe.
@@ -11,6 +18,21 @@ export async function handleHttpRequest(req: Request): Promise<Response> {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  // Conduit service-to-service auth (gateway#377 parity): rejected
+  // BEFORE any credential extraction, mirroring every other ported
+  // wrapper (e.g. containers/sentinelone-mcp/gateway_wrapper.py). This
+  // repo uses a Fetch API Request, so the header read differs from the
+  // Node-http-style repos: request.headers.get() returns string | null.
+  if (S2S_SECRET && !verifyS2sHeader(req.headers.get(S2S_HEADER) ?? undefined, S2S_SECRET)) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'Missing or invalid X-Gateway-S2S header: this endpoint only accepts requests signed by the gateway.',
+      }),
+      { status: 401, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 
   // Gateway mode: credentials must arrive on every request via the
