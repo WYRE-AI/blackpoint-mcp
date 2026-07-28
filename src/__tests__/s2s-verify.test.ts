@@ -16,25 +16,28 @@ describe("verifyS2sHeader", () => {
   const MASTER = "test-master-secret-do-not-use-in-prod";
   const blackpointSubkey = deriveRecipientSubkey(MASTER, "blackpoint");
   const siblingSubkey = deriveRecipientSubkey(MASTER, "abnormal");
-  const now = Math.floor(Date.now() / 1000);
-
   it("accepts a header minted with this vendor's own derived subkey", () => {
+    const now = Math.floor(Date.now() / 1000);
     expect(verifyS2sHeader(mintHeader(blackpointSubkey, now), blackpointSubkey)).toBe(true);
   });
 
   it("REJECTS a header minted for a different vendor's derived subkey (recipient-binding proof)", () => {
+    const now = Math.floor(Date.now() / 1000);
     expect(verifyS2sHeader(mintHeader(siblingSubkey, now), blackpointSubkey)).toBe(false);
   });
 
   it("rejects a stale timestamp outside the skew window", () => {
+    const now = Math.floor(Date.now() / 1000);
     expect(verifyS2sHeader(mintHeader(blackpointSubkey, now - 301), blackpointSubkey)).toBe(false);
   });
 
   it("rejects a future timestamp outside the skew window", () => {
+    const now = Math.floor(Date.now() / 1000);
     expect(verifyS2sHeader(mintHeader(blackpointSubkey, now + 301), blackpointSubkey)).toBe(false);
   });
 
   it("accepts a timestamp at the edge of the skew window", () => {
+    const now = Math.floor(Date.now() / 1000);
     expect(verifyS2sHeader(mintHeader(blackpointSubkey, now - 300), blackpointSubkey)).toBe(true);
   });
 
@@ -47,10 +50,12 @@ describe("verifyS2sHeader", () => {
   });
 
   it("rejects when the secret is empty (dark-by-default guarantee)", () => {
+    const now = Math.floor(Date.now() / 1000);
     expect(verifyS2sHeader(mintHeader(blackpointSubkey, now), "")).toBe(false);
   });
 
   it("rejects a tampered signature", () => {
+    const now = Math.floor(Date.now() / 1000);
     const header = mintHeader(blackpointSubkey, now);
     const tampered = header.slice(0, -1) + (header.endsWith("0") ? "1" : "0");
     expect(verifyS2sHeader(tampered, blackpointSubkey)).toBe(false);
