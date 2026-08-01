@@ -1,3 +1,10 @@
+## [1.1.10](https://github.com/wyre-technology/blackpoint-mcp/compare/v1.1.9...v1.1.10) (2026-08-01)
+
+
+### Bug Fixes
+
+* **security:** enforce gateway S2S verification (gateway[#377](https://github.com/wyre-technology/blackpoint-mcp/issues/377) parity) ([#54](https://github.com/wyre-technology/blackpoint-mcp/issues/54)) ([94684a7](https://github.com/wyre-technology/blackpoint-mcp/commit/94684a78c9f72cefb7c22ff607b04de84b0d0caa))
+
 ## [1.1.9](https://github.com/wyre-technology/blackpoint-mcp/compare/v1.1.8...v1.1.9) (2026-07-22)
 
 
