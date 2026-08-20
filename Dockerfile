@@ -2,16 +2,14 @@ FROM node:26-alpine AS builder
 
 WORKDIR /app
 
-# Add GitHub Packages auth for WYRE packages
-ARG NODE_AUTH_TOKEN
-RUN echo "@wyre-technology:registry=https://npm.pkg.github.com" > .npmrc && \
-    echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> .npmrc
-
 # Copy package files
 COPY package*.json ./
 
+# GitHub Packages auth comes in as a BuildKit secret (the release workflow
+# passes --secret id=npmrc) so the token never lands in a layer or in image
+# metadata. Local builds: --secret id=npmrc,src=$HOME/.npmrc
 # Install dependencies (ignore scripts to prevent premature builds)
-RUN npm ci --ignore-scripts
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm ci --ignore-scripts
 
 # Copy source code
 COPY . .
