@@ -40,10 +40,10 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 
 # Add OCI labels for GHCR repository linking
-LABEL org.opencontainers.image.source=https://github.com/wyre-technology/blackpoint-mcp
+LABEL org.opencontainers.image.source=https://github.com/WYRE-AI/blackpoint-mcp
 LABEL org.opencontainers.image.description="MCP server for Blackpoint Cyber CompassOne"
 LABEL org.opencontainers.image.version="0.1.0"
-LABEL io.modelcontextprotocol.server.name="io.github.wyre-technology/blackpoint-mcp"
+LABEL io.modelcontextprotocol.server.name="io.github.WYRE-AI/blackpoint-mcp"
 
 # Switch to non-root user
 USER mcp

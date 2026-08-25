@@ -4,10 +4,10 @@
   "description": "MCP server for Blackpoint Cyber CompassOne - MDR security platform",
   "author": "WYRE Technology",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/wyre-technology/blackpoint-mcp",
+  "homepage": "https://github.com/WYRE-AI/blackpoint-mcp",
   "repository": {
     "type": "git",
-    "url": "https://github.com/wyre-technology/blackpoint-mcp.git"
+    "url": "https://github.com/WYRE-AI/blackpoint-mcp.git"
   },
   "capabilities": {
     "tools": {
