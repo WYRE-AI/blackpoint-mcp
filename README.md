@@ -15,12 +15,18 @@ This MCP server provides access to CompassOne's security capabilities through a 
 
 ### Domain Structure
 
-The server uses decision-tree navigation to organize tools:
+All implemented tools are listed together in a single `tools/list` call — no
+navigation step required. `blackpoint_status` reports current health and
+available domains, and `blackpoint_navigate`/`blackpoint_back` remain for
+clients that like a guided menu, but they're optional: every domain tool
+(`blackpoint_tenants_*`, `blackpoint_assets_*`, `blackpoint_detections_*`,
+`blackpoint_vulnerabilities_*`) is callable directly from the start.
 
-1. **Initial State**: Navigation tools only (`blackpoint_navigate`, `blackpoint_status`)
-2. **Domain Entry**: Navigate to a domain to see its specific tools
-3. **Domain Tools**: Use domain-specific operations
-4. **Return**: Use `blackpoint_back` to return to navigation
+(Earlier versions gated domain tools behind a `blackpoint_navigate` call.
+That doesn't work behind the Conduit gateway — Conduit suppresses
+`_navigate`/`_back` from every vendor's tool list for security reasons, which
+made every domain tool unreachable through it. The list is flat now so it
+works the same everywhere.)
 
 ### Tool Naming Convention
 

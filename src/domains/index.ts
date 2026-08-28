@@ -1,114 +1,46 @@
-import type { DomainHandler, NavigationDomain } from '../utils/types.js';
-import { navigationHandler, getNavigationState } from './navigation.js';
+import type { DomainHandler, Tool } from '../utils/types.js';
+import { navigationHandler } from './navigation.js';
 import { assetsHandler } from './assets.js';
 import { tenantsHandler } from './tenants.js';
 import { detectionsHandler } from './detections.js';
 import { vulnerabilitiesHandler } from './vulnerabilities.js';
 
-// Domain registry with lazy loading
-const domainHandlers: Record<NavigationDomain, () => DomainHandler> = {
-  partners: () => ({
-    getTools: () => [
-      {
-        name: 'blackpoint_partners_placeholder',
-        description: 'Partner management - Not yet implemented (Accounts resource available in SDK)',
-        inputSchema: { type: 'object', properties: {} },
-      },
-    ],
-    handleCall: async () => ({
-      content: [{ type: 'text', text: 'Partner management not yet implemented in MCP server' }],
-      isError: true,
-    }),
-  }),
+// Every tool this server actually implements, always listed together.
+//
+// Earlier versions gated domain tools behind a `blackpoint_navigate` call
+// (tools/list returned only navigation tools until the client "entered" a
+// domain). That decision-tree pattern doesn't survive the Conduit gateway:
+// Conduit suppresses `_navigate`/`_back` tools from every vendor's tools/list
+// and refuses to execute them (they'd advertise a tool catalog the caller's
+// access tier may not permit — see wyre-mcp-gateway-platform's
+// discovery-tools.ts), leaving `blackpoint_navigate` unreachable and every
+// domain tool behind it unreachable with it. Flattening the list — the same
+// fix already applied to other MCP vendors on the fleet (e.g. scalepad,
+// sherweb) — makes every real tool visible and callable regardless of
+// transport. `blackpoint_navigate`/`_status`/`_back` stay for stdio users
+// who still want the menu; they're just no longer load-bearing for
+// visibility.
+//
+// navigation.ts's own per-request NavigationState (currentDomain) still
+// drives blackpoint_back's conditional listing and blackpoint_status's
+// reported domain — that's an intentional, separately-tested menu feature
+// for stdio users, not a leftover of the gating this fixes. It's a
+// candidate for its own future simplification pass, but that's a separate
+// decision from making every domain tool reachable.
+const IMPLEMENTED_HANDLERS: DomainHandler[] = [
+  navigationHandler,
+  tenantsHandler,
+  assetsHandler,
+  detectionsHandler,
+  vulnerabilitiesHandler,
+];
 
-  tenants: () => tenantsHandler,
-
-  assets: () => assetsHandler,
-
-  alerts: () => ({
-    getTools: () => [
-      {
-        name: 'blackpoint_alerts_placeholder',
-        description: 'Security alerts management - Not yet implemented (Alert models exist but no API handlers)',
-        inputSchema: { type: 'object', properties: {} },
-      },
-    ],
-    handleCall: async () => ({
-      content: [{ type: 'text', text: 'Alert management not yet implemented - API handlers not available in CompassOne Rust wrapper' }],
-      isError: true,
-    }),
-  }),
-
-  detections: () => detectionsHandler,
-
-  tickets: () => ({
-    getTools: () => [
-      {
-        name: 'blackpoint_tickets_placeholder',
-        description: 'Incident tickets management - Not yet implemented (Ticket models exist but no API handlers)',
-        inputSchema: { type: 'object', properties: {} },
-      },
-    ],
-    handleCall: async () => ({
-      content: [{ type: 'text', text: 'Ticket management not yet implemented - API handlers not available in CompassOne Rust wrapper' }],
-      isError: true,
-    }),
-  }),
-
-  cloud_security: () => ({
-    getTools: () => [
-      {
-        name: 'blackpoint_cloud_security_placeholder',
-        description: 'Cloud security (M365/Google/Cisco) - Implemented in SDK but not yet exposed in MCP server',
-        inputSchema: { type: 'object', properties: {} },
-      },
-    ],
-    handleCall: async () => ({
-      content: [{ type: 'text', text: 'Cloud security domain available in SDK but not yet implemented in MCP server' }],
-      isError: true,
-    }),
-  }),
-
-  vulnerabilities: () => vulnerabilitiesHandler,
-
-  threat_intel: () => ({
-    getTools: () => [
-      {
-        name: 'blackpoint_threat_intel_placeholder',
-        description: 'Threat intelligence - Available as part of vulnerabilities (dark web monitoring)',
-        inputSchema: { type: 'object', properties: {} },
-      },
-    ],
-    handleCall: async () => ({
-      content: [{ type: 'text', text: 'Threat intelligence is available via blackpoint_vulnerabilities_darkweb_list in the vulnerabilities domain' }],
-    }),
-  }),
-
-  notifications: () => ({
-    getTools: () => [
-      {
-        name: 'blackpoint_notifications_placeholder',
-        description: 'Notification channels and contact groups - Implemented in SDK but not yet exposed in MCP server',
-        inputSchema: { type: 'object', properties: {} },
-      },
-    ],
-    handleCall: async () => ({
-      content: [{ type: 'text', text: 'Notifications domain available in SDK but not yet implemented in MCP server' }],
-    }),
-  }),
-};
-
-export function getDomainHandler(domain: NavigationDomain | null): DomainHandler | null {
-  if (!domain) return null;
-  return domainHandlers[domain]?.() || null;
+export function getAllTools(): Tool[] {
+  return IMPLEMENTED_HANDLERS.flatMap((handler) => handler.getTools());
 }
 
-export function getCurrentDomainHandler(): DomainHandler {
-  const state = getNavigationState();
-  if (!state.currentDomain) {
-    return navigationHandler;
-  }
-
-  const domainHandler = getDomainHandler(state.currentDomain);
-  return domainHandler || navigationHandler;
+export function getHandlerForTool(toolName: string): DomainHandler | null {
+  return IMPLEMENTED_HANDLERS.find((handler) =>
+    handler.getTools().some((tool) => tool.name === toolName)
+  ) ?? null;
 }
