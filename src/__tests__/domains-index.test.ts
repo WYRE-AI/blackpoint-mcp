@@ -38,15 +38,14 @@ describe('getAllTools', () => {
 });
 
 describe('getHandlerForTool', () => {
-  it('resolves a domain tool to its owning handler without any navigation state', () => {
-    expect(getHandlerForTool('blackpoint_assets_list')).not.toBeNull();
-    expect(getHandlerForTool('blackpoint_tenants_get')).not.toBeNull();
-    expect(getHandlerForTool('blackpoint_vulnerabilities_darkweb_list')).not.toBeNull();
-  });
-
-  it('resolves navigation tools to the navigation handler', () => {
-    expect(getHandlerForTool('blackpoint_status')).not.toBeNull();
-    expect(getHandlerForTool('blackpoint_navigate')).not.toBeNull();
+  it.each([
+    'blackpoint_assets_list',
+    'blackpoint_tenants_get',
+    'blackpoint_vulnerabilities_darkweb_list',
+    'blackpoint_status',
+    'blackpoint_navigate',
+  ])('resolves %s to its owning handler without any navigation state', (name) => {
+    expect(getHandlerForTool(name)).not.toBeNull();
   });
 
   it('returns null for an unknown tool name', () => {
