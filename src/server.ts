@@ -1,7 +1,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { getCurrentDomainHandler } from './domains/index.js';
+import { getAllTools, getHandlerForTool } from './domains/index.js';
 import { logger } from './utils/logger.js';
 import { setServerRef } from './utils/server-ref.js';
 
@@ -23,8 +23,7 @@ export function createMcpServer(): Server {
 
   // List tools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const handler = getCurrentDomainHandler();
-    const tools = handler.getTools();
+    const tools = getAllTools();
 
     logger.info('Tools listed', { count: tools.length, toolNames: tools.map(t => t.name) });
 
@@ -38,7 +37,14 @@ export function createMcpServer(): Server {
     logger.info('Tool called', { name, args });
 
     try {
-      const handler = getCurrentDomainHandler();
+      const handler = getHandlerForTool(name);
+      if (!handler) {
+        return {
+          content: [{ type: 'text', text: `Unknown tool: ${name}` }],
+          isError: true,
+        };
+      }
+
       // MCP SDK's CallToolRequest doesn't expose a JSON-RPC `id` to handlers
       // (the envelope is stripped). RequestHandlerExtra.requestId is optional;
       // omit it rather than fabricate one.
