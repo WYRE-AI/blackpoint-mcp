@@ -122,3 +122,92 @@ describe('handleHttpRequest — S2S wiring integration', () => {
     });
   });
 });
+
+/**
+ * Regression coverage for the request-scoping bug in the gateway-credential
+ * branch: baseUrl must come from the x-blackpoint-base-url REQUEST HEADER
+ * (per-request, matching apiToken's own scoping), never from
+ * process.env.BLACKPOINT_BASE_URL (the container's own environment) — a
+ * customer's configured base URL was previously silently dropped in favor
+ * of whatever (or nothing) was baked into the container's env, with no
+ * error anywhere in the request path.
+ */
+describe('handleHttpRequest — gateway-mode baseUrl scoping', () => {
+  const origEnv = { ...process.env };
+  let capturedContext: { apiToken: string; baseUrl?: string } | undefined;
+
+  beforeEach(() => {
+    vi.resetModules();
+    process.env = { ...origEnv };
+    delete process.env.CONDUIT_S2S_SECRET;
+    process.env.AUTH_MODE = 'gateway';
+    capturedContext = undefined;
+  });
+
+  afterEach(() => {
+    process.env = { ...origEnv };
+    vi.doUnmock('../utils/request-context.js');
+  });
+
+  it('uses the x-blackpoint-base-url header, not process.env.BLACKPOINT_BASE_URL, when both are set to different values', async () => {
+    process.env.BLACKPOINT_BASE_URL = 'https://env-baked-in.example.com';
+
+    vi.doMock('../utils/request-context.js', async () => {
+      const actual = await vi.importActual<typeof import('../utils/request-context.js')>(
+        '../utils/request-context.js'
+      );
+      return {
+        ...actual,
+        requestContext: {
+          run: vi.fn((ctx: { apiToken: string; baseUrl?: string }) => {
+            capturedContext = ctx;
+            return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }),
+        },
+      };
+    });
+
+    const { handleHttpRequest } = await import('../http.js');
+    const req = new Request('http://localhost/mcp', {
+      method: 'POST',
+      headers: {
+        'x-blackpoint-api-token': 'test-token',
+        'x-blackpoint-base-url': 'https://customer-instance.blackpointcyber.com',
+      },
+    });
+    await handleHttpRequest(req);
+
+    expect(capturedContext).toBeDefined();
+    expect(capturedContext?.baseUrl).toBe('https://customer-instance.blackpointcyber.com');
+    expect(capturedContext?.baseUrl).not.toBe('https://env-baked-in.example.com');
+  });
+
+  it('omits baseUrl entirely when the header is absent, even if process.env.BLACKPOINT_BASE_URL is set (no env fallback)', async () => {
+    process.env.BLACKPOINT_BASE_URL = 'https://env-baked-in.example.com';
+
+    vi.doMock('../utils/request-context.js', async () => {
+      const actual = await vi.importActual<typeof import('../utils/request-context.js')>(
+        '../utils/request-context.js'
+      );
+      return {
+        ...actual,
+        requestContext: {
+          run: vi.fn((ctx: { apiToken: string; baseUrl?: string }) => {
+            capturedContext = ctx;
+            return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }),
+        },
+      };
+    });
+
+    const { handleHttpRequest } = await import('../http.js');
+    const req = new Request('http://localhost/mcp', {
+      method: 'POST',
+      headers: { 'x-blackpoint-api-token': 'test-token' },
+    });
+    await handleHttpRequest(req);
+
+    expect(capturedContext).toBeDefined();
+    expect(capturedContext?.baseUrl).toBeUndefined();
+  });
+});

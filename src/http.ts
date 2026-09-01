@@ -59,7 +59,13 @@ export async function handleHttpRequest(req: Request): Promise<Response> {
       );
     }
 
-    const baseUrl = process.env.BLACKPOINT_BASE_URL;
+    // Same request-scoping rule as apiToken above: a customer-configured
+    // base URL arrives per-request via the x-blackpoint-base-url header
+    // (Conduit's headerMapping sends it there). Falling back to the
+    // process environment here would silently drop any customer's
+    // non-default Blackpoint instance and route every tool call at
+    // whatever (or nothing) is baked into this container's own env.
+    const baseUrl = req.headers.get('x-blackpoint-base-url') ?? undefined;
     return requestContext.run(
       {
         apiToken,
