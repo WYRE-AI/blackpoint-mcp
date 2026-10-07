@@ -1,7 +1,7 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { DomainHandler, CallToolResult, RequestHandlerExtra } from '../utils/types.js';
 import { getClient } from '../utils/client.js';
-import { logger } from '../utils/logger.js';
+import { toolFailure } from '../utils/service-error.js';
 
 function getTools(): Tool[] {
   return [
@@ -190,11 +190,7 @@ async function handleCall(
 
         return { content: [{ type: 'text', text: resultText }] };
       } catch (error) {
-        logger.error('Failed to list vulnerabilities', error);
-        return {
-          content: [{ type: 'text', text: `Failed to list vulnerabilities: ${error}` }],
-          isError: true,
-        };
+        return toolFailure('Failed to list vulnerabilities', error);
       }
     }
 
@@ -217,11 +213,7 @@ async function handleCall(
 
         return { content: [{ type: 'text', text: resultText }] };
       } catch (error) {
-        logger.error('Failed to list vulnerability scans', error);
-        return {
-          content: [{ type: 'text', text: `Failed to list scans: ${error}` }],
-          isError: true,
-        };
+        return toolFailure('Failed to list scans', error);
       }
     }
 
@@ -244,11 +236,7 @@ async function handleCall(
 
         return { content: [{ type: 'text', text: resultText }] };
       } catch (error) {
-        logger.error('Failed to list dark web exposures', error);
-        return {
-          content: [{ type: 'text', text: `Failed to list dark web exposures: ${error}` }],
-          isError: true,
-        };
+        return toolFailure('Failed to list dark web exposures', error);
       }
     }
 
@@ -271,11 +259,7 @@ async function handleCall(
 
         return { content: [{ type: 'text', text: resultText }] };
       } catch (error) {
-        logger.error('Failed to list external exposures', error);
-        return {
-          content: [{ type: 'text', text: `Failed to list external exposures: ${error}` }],
-          isError: true,
-        };
+        return toolFailure('Failed to list external exposures', error);
       }
     }
 

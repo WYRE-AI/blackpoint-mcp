@@ -1,7 +1,8 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { DomainHandler, CallToolResult, RequestHandlerExtra } from '../utils/types.js';
 import { getClient } from '../utils/client.js';
-import { logger } from '../utils/logger.js';
+import { formatPagination, pageItems } from '../utils/format-pagination.js';
+import { toolFailure } from '../utils/service-error.js';
 
 function getTools(): Tool[] {
   return [
@@ -77,14 +78,10 @@ async function handleCall(
 
       try {
         const response = await client.tenants.list(params);
+        const { items, pagination } = pageItems(response);
+        const pageLabel = formatPagination(pagination);
 
-        const items = Array.isArray(response) ? response : (response?.data ?? []);
-        const pagination = Array.isArray(response) ? null : response?.pagination;
-
-        const summary = [
-          `Found ${items.length} tenants`,
-          pagination ? `(Page ${pagination.page || 1} of ${Math.ceil((pagination.totalCount || 0) / (pagination.pageSize || 50))})` : '',
-        ].filter(Boolean).join(' ');
+        const summary = [`Found ${items.length} tenants`, pageLabel].filter(Boolean).join(' ');
 
         const resultText = [
           summary,
@@ -101,11 +98,7 @@ async function handleCall(
           content: [{ type: 'text', text: resultText }],
         };
       } catch (error) {
-        logger.error('Failed to list tenants', error);
-        return {
-          content: [{ type: 'text', text: `Failed to list tenants: ${error}` }],
-          isError: true,
-        };
+        return toolFailure('Failed to list tenants', error);
       }
     }
 
@@ -128,11 +121,7 @@ async function handleCall(
           content: [{ type: 'text', text: tenantDetails }],
         };
       } catch (error) {
-        logger.error('Failed to get tenant', { id, error });
-        return {
-          content: [{ type: 'text', text: `Failed to get tenant ${id}: ${error}` }],
-          isError: true,
-        };
+        return toolFailure(`Failed to get tenant ${id}`, error, { id });
       }
     }
 

@@ -178,8 +178,49 @@ describe('handleHttpRequest — gateway-mode baseUrl scoping', () => {
     await handleHttpRequest(req);
 
     expect(capturedContext).toBeDefined();
-    expect(capturedContext?.baseUrl).toBe('https://customer-instance.blackpointcyber.com');
+    expect(capturedContext?.baseUrl).toBe('https://customer-instance.blackpointcyber.com/v1');
     expect(capturedContext?.baseUrl).not.toBe('https://env-baked-in.example.com');
+  });
+
+  it('normalizes a live host with or without /v1, and the legacy CompassOne host, to https://api.blackpointcyber.com/v1', async () => {
+    vi.doMock('../utils/request-context.js', async () => {
+      const actual = await vi.importActual<typeof import('../utils/request-context.js')>(
+        '../utils/request-context.js'
+      );
+      return {
+        ...actual,
+        requestContext: {
+          run: vi.fn((ctx: { apiToken: string; baseUrl?: string }) => {
+            capturedContext = ctx;
+            return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }),
+        },
+      };
+    });
+
+    const { handleHttpRequest } = await import('../http.js');
+    const headers = [
+      'https://api.blackpointcyber.com',
+      'https://api.blackpointcyber.com/v1',
+      'https://api.blackpointcyber.com/v1/',
+      'https://api.compassone.blackpointcyber.com',
+      'https://api.compassone.blackpointcyber.com/v1',
+      'https://api.compassone.blackpointcyber.com/',
+    ];
+
+    for (const baseUrl of headers) {
+      capturedContext = undefined;
+      await handleHttpRequest(
+        new Request('http://localhost/mcp', {
+          method: 'POST',
+          headers: {
+            'x-blackpoint-api-token': 'test-token',
+            'x-blackpoint-base-url': baseUrl,
+          },
+        })
+      );
+      expect(capturedContext?.baseUrl).toBe('https://api.blackpointcyber.com/v1');
+    }
   });
 
   it('omits baseUrl entirely when the header is absent, even if process.env.BLACKPOINT_BASE_URL is set (no env fallback)', async () => {

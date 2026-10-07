@@ -1,4 +1,5 @@
-import { CompassOneClient, CompassOneConfig } from '@wyre-technology/node-blackpoint';
+import { CompassOneClient, type CompassOneConfig } from '@wyre-ai/node-blackpoint';
+import { normalizeBlackpointBaseUrl } from './base-url.js';
 import { logger } from './logger.js';
 import { getRequestContext } from './request-context.js';
 
@@ -17,7 +18,10 @@ export async function getClient(): Promise<CompassOneClient> {
   const ctx = getRequestContext();
   if (ctx) {
     const config: CompassOneConfig = { apiToken: ctx.apiToken };
-    if (ctx.baseUrl) config.baseUrl = ctx.baseUrl;
+    // Gateway mode must not fall through to process.env. A header value is
+    // normalized (legacy CompassOne host, missing or extra /v1). Omitting
+    // the header leaves baseUrl unset so the SDK uses the live default.
+    if (ctx.baseUrl) config.baseUrl = normalizeBlackpointBaseUrl(ctx.baseUrl);
     logger.debug('Creating per-request CompassOne client (gateway mode)');
     return new CompassOneClient(config);
   }
@@ -29,9 +33,10 @@ export async function getClient(): Promise<CompassOneClient> {
     );
   }
 
-  const config: CompassOneConfig = { apiToken };
-  const baseUrl = process.env.BLACKPOINT_BASE_URL;
-  if (baseUrl) config.baseUrl = baseUrl;
+  const config: CompassOneConfig = {
+    apiToken,
+    baseUrl: normalizeBlackpointBaseUrl(process.env.BLACKPOINT_BASE_URL),
+  };
 
   logger.debug('Creating CompassOne client from environment (stdio mode)');
   return new CompassOneClient(config);

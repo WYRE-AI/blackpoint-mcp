@@ -3,6 +3,7 @@ import { createMcpServer } from './server.js';
 import { logger } from './utils/logger.js';
 import { requestContext, freshNavigationState } from './utils/request-context.js';
 import { verifyS2sHeader, S2S_HEADER } from './s2s-verify.js';
+import { normalizeBlackpointBaseUrl } from './utils/base-url.js';
 
 // Conduit service-to-service auth (gateway#377 parity). Non-empty =
 // enforce X-Gateway-S2S on every /mcp request; empty = disabled, behavior
@@ -65,7 +66,13 @@ export async function handleHttpRequest(req: Request): Promise<Response> {
     // process environment here would silently drop any customer's
     // non-default Blackpoint instance and route every tool call at
     // whatever (or nothing) is baked into this container's own env.
-    const baseUrl = req.headers.get('x-blackpoint-base-url') ?? undefined;
+    // Normalize before the request context is stored. The live host (with or
+    // without /v1) and the legacy api.compassone.blackpointcyber.com host
+    // become https://api.blackpointcyber.com/v1. Any other host keeps its
+    // origin and gains a single /v1 suffix. An absent header stays absent so
+    // this process's BLACKPOINT_BASE_URL cannot override a customer.
+    const rawBaseUrl = req.headers.get('x-blackpoint-base-url');
+    const baseUrl = rawBaseUrl ? normalizeBlackpointBaseUrl(rawBaseUrl) : undefined;
     return requestContext.run(
       {
         apiToken,

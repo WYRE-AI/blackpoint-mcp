@@ -1,74 +1,99 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import type {
+  AlertGroup,
+  AlertGroupListParams,
+  AlertGroupStatus,
+} from '@wyre-ai/node-blackpoint';
 import type { DomainHandler, CallToolResult, RequestHandlerExtra } from '../utils/types.js';
 import { getClient } from '../utils/client.js';
-import { logger } from '../utils/logger.js';
+import { formatPagination, pageItems } from '../utils/format-pagination.js';
+import { toolFailure } from '../utils/service-error.js';
+
+const ALERT_GROUP_STATUSES = ['OPEN', 'RESOLVED'] as const;
+
+function readStatus(value: unknown): AlertGroupStatus | AlertGroupStatus[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  const values = (Array.isArray(value) ? value : [value]).map(item => String(item));
+  if (values.length === 0) return undefined;
+  const invalid = values.filter(item => item !== 'OPEN' && item !== 'RESOLVED');
+  if (invalid.length > 0) {
+    throw new Error(`status must be OPEN or RESOLVED (got ${invalid.join(', ')})`);
+  }
+  const statuses = values as AlertGroupStatus[];
+  return statuses.length === 1 ? statuses[0] : statuses;
+}
+
+function formatAlertGroupLine(group: AlertGroup): string {
+  const title = group.hostname || group.id;
+  const types = group.alertTypes?.length ? ` - Types: ${group.alertTypes.join(', ')}` : '';
+  return (
+    `• ${title} (${group.id})` +
+    (group.status ? ` - Status: ${group.status}` : '') +
+    (group.alertCount !== undefined ? ` - Alerts: ${group.alertCount}` : '') +
+    types +
+    (group.username ? ` - User: ${group.username}` : '') +
+    (group.type ? ` - Type: ${group.type}` : '')
+  );
+}
 
 function getTools(): Tool[] {
   return [
     {
       name: 'blackpoint_detections_list',
-      description: 'List security detections with filtering options',
+      description:
+        'List alert groups for a tenant (CompassOne removed GET /detections; groups are the triage unit). Paged with skip/take. status is OPEN or RESOLVED. tenantId is sent as the x-tenant-id header.',
       inputSchema: {
         type: 'object',
         properties: {
           tenantId: {
             type: 'string',
-            description: 'Filter by specific tenant ID',
-          },
-          assetId: {
-            type: 'string',
-            description: 'Filter by specific asset ID',
-          },
-          severity: {
-            type: 'array',
-            items: {
-              type: 'string',
-              enum: ['low', 'medium', 'high', 'critical'],
-            },
-            description: 'Filter by severity levels',
+            description: 'Tenant ID. Required. Sent as the x-tenant-id header.',
           },
           status: {
-            type: 'array',
-            items: {
-              type: 'string',
-              enum: ['new', 'investigating', 'resolved', 'false_positive'],
-            },
-            description: 'Filter by detection status',
-          },
-          fromDate: {
             type: 'string',
-            description: 'Filter detections from this date (ISO 8601 format)',
+            enum: [...ALERT_GROUP_STATUSES],
+            description: 'Alert group status: OPEN or RESOLVED',
           },
-          toDate: {
-            type: 'string',
-            description: 'Filter detections to this date (ISO 8601 format)',
-          },
-          page: {
+          skip: {
             type: 'number',
-            description: 'Page number (default: 1)',
-            minimum: 1,
+            description: 'Number of alert groups to skip',
+            minimum: 0,
           },
-          pageSize: {
+          take: {
             type: 'number',
-            description: 'Items per page (default: 50)',
+            description: 'Number of alert groups to return',
             minimum: 1,
             maximum: 100,
           },
+          search: {
+            type: 'string',
+            description: 'Search alert groups',
+          },
+          since: {
+            type: 'string',
+            description: 'ISO-8601 instant. CompassOne allows at most 90 days back.',
+          },
         },
+        required: ['tenantId'],
       },
     },
     {
       name: 'blackpoint_detections_get',
-      description: 'Get detailed information about a specific detection',
+      description:
+        'Get one alert group by id. tenantId is required and is sent as the x-tenant-id header. Reads GET /alert-groups/{id}.',
       inputSchema: {
         type: 'object',
         properties: {
           id: {
             type: 'string',
-            description: 'Detection ID',
+            description: 'Alert group ID',
+          },
+          tenantId: {
+            type: 'string',
+            description: 'Tenant ID. Required. Sent as the x-tenant-id header.',
           },
         },
-        required: ['id'],
+        required: ['id', 'tenantId'],
       },
     },
   ];
@@ -83,81 +108,60 @@ async function handleCall(
 
   switch (toolName) {
     case 'blackpoint_detections_list': {
-      const params = {
-        tenantId: args.tenantId as string | undefined,
-        assetId: args.assetId as string | undefined,
-        severity: args.severity as string[] | undefined,
-        status: args.status as string[] | undefined,
-        fromDate: args.fromDate as string | undefined,
-        toDate: args.toDate as string | undefined,
-        page: args.page as number | undefined,
-        pageSize: args.pageSize as number | undefined,
-      };
-
       try {
-        const response = await client.detections.list(params);
+        const params: AlertGroupListParams = {
+          tenantId: args.tenantId as string,
+        };
+        if (args.skip !== undefined) params.skip = Number(args.skip);
+        if (args.take !== undefined) params.take = Number(args.take);
+        if (args.search !== undefined) params.search = String(args.search);
+        if (args.since !== undefined) params.since = String(args.since);
+        const status = readStatus(args.status);
+        if (status !== undefined) params.status = status;
 
-        const items = Array.isArray(response) ? response : (response?.data ?? []);
-        const pagination = Array.isArray(response) ? null : response?.pagination;
+        const response = await client.alertGroups.list(params);
+        const { items, pagination } = pageItems(response);
+        const pageLabel = formatPagination(pagination);
 
-        const summary = [
-          `Found ${items.length} detections`,
-          pagination ? `(Page ${pagination.page || 1} of ${Math.ceil((pagination.totalCount || 0) / (pagination.pageSize || 50))})` : '',
-        ].filter(Boolean).join(' ');
+        const summary = [`Found ${items.length} alert groups`, pageLabel].filter(Boolean).join(' ');
 
-        const resultText = [
-          summary,
-          '',
-          ...items.map((detection: any) =>
-            `• ${detection.ruleName || 'Unknown rule'} (${detection.id})` +
-            (detection.severity ? ` - Severity: ${detection.severity}` : '') +
-            (detection.status ? ` - Status: ${detection.status}` : '') +
-            (detection.assetId ? ` - Asset: ${detection.assetId}` : '') +
-            (detection.created ? ` - Detected: ${detection.created}` : '')
-          ),
-        ].join('\n');
+        const resultText = [summary, '', ...items.map(formatAlertGroupLine)].join('\n');
 
         return {
           content: [{ type: 'text', text: resultText }],
         };
       } catch (error) {
-        logger.error('Failed to list detections', error);
-        return {
-          content: [{ type: 'text', text: `Failed to list detections: ${error}` }],
-          isError: true,
-        };
+        return toolFailure('Failed to list detections', error);
       }
     }
 
     case 'blackpoint_detections_get': {
       const id = args.id as string;
+      const tenantId = args.tenantId as string;
 
       try {
-        const detection = await client.detections.get(id);
+        const group = await client.alertGroups.get(id, { tenantId });
+        const types = group.alertTypes?.length ? group.alertTypes.join(', ') : null;
 
-        const detectionDetails = [
-          `Detection: ${detection.ruleName || 'Unknown rule'} (${detection.id})`,
-          `Severity: ${detection.severity}`,
-          `Status: ${detection.status}`,
-          detection.tenantId ? `Tenant: ${detection.tenantId}` : null,
-          detection.assetId ? `Asset: ${detection.assetId}` : null,
-          detection.description ? `Description: ${detection.description}` : null,
-          detection.source ? `Source: ${detection.source}` : null,
-          detection.timestamp ? `Timestamp: ${detection.timestamp}` : null,
-          detection.mitreTactics?.length ? `MITRE Tactics: ${detection.mitreTactics.join(', ')}` : null,
-          detection.mitreTechniques?.length ? `MITRE Techniques: ${detection.mitreTechniques.join(', ')}` : null,
-          detection.created ? `Created: ${detection.created}` : null,
-        ].filter(Boolean).join('\n');
+        const details = [
+          `Alert group: ${group.hostname || group.id} (${group.id})`,
+          group.status ? `Status: ${group.status}` : null,
+          group.alertCount !== undefined ? `Alerts: ${group.alertCount}` : null,
+          types ? `Types: ${types}` : null,
+          group.hostname ? `Host: ${group.hostname}` : null,
+          group.username ? `User: ${group.username}` : null,
+          group.type ? `Type: ${group.type}` : null,
+          group.tenantId ? `Tenant: ${group.tenantId}` : null,
+          group.created ? `Created: ${group.created}` : null,
+        ]
+          .filter(Boolean)
+          .join('\n');
 
         return {
-          content: [{ type: 'text', text: detectionDetails }],
+          content: [{ type: 'text', text: details }],
         };
       } catch (error) {
-        logger.error('Failed to get detection', { id, error });
-        return {
-          content: [{ type: 'text', text: `Failed to get detection ${id}: ${error}` }],
-          isError: true,
-        };
+        return toolFailure(`Failed to get detection ${id}`, error, { id });
       }
     }
 

@@ -9,8 +9,8 @@ This MCP server provides access to CompassOne's security capabilities through a 
 ### Available Domains
 
 - **🏢 Tenants**: Customer tenant management
-- **💻 Assets**: Endpoint and server inventory (endpoint, server, network, cloud, mobile, iot)  
-- **🔍 Detections**: Security detections and telemetry
+- **💻 Assets**: Inventory by documented class (`CONTAINER`, `DEVICE`, `FRAMEWORK`, `NETSTAT`, `PERSON`, `PROCESS`, `SERVICE`, `SOFTWARE`, `SOURCE`, `SURVEY`, `USER`). `CLOUD` is not an asset class.
+- **🔍 Detections**: Alert groups from `GET /alert-groups` (`OPEN` / `RESOLVED`, `skip` / `take`)
 - **🛡️ Vulnerabilities**: Vulnerability management, dark web monitoring, external exposure scanning
 
 ### Domain Structure
@@ -50,7 +50,7 @@ npm install blackpoint-mcp
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `BLACKPOINT_API_TOKEN` | CompassOne API token | Yes |
-| `BLACKPOINT_BASE_URL` | API base URL (may vary by region/partner) | No |
+| `BLACKPOINT_BASE_URL` | API base URL. Defaults to `https://api.blackpointcyber.com/v1`. A value with or without `/v1`, or the legacy `api.compassone.blackpointcyber.com` host, is normalized to that URL. Other hosts keep their origin and gain a single `/v1` suffix. | No |
 | `MCP_TRANSPORT` | Transport mode: `stdio` or `http` | No (default: stdio) |
 | `MCP_HTTP_PORT` | HTTP port for gateway mode | No (default: 8080) |
 | `AUTH_MODE` | Set to `gateway` for header-based auth | No |
@@ -60,7 +60,8 @@ npm install blackpoint-mcp
 
 When `AUTH_MODE=gateway`, the server reads credentials from HTTP headers:
 
-- `X-Blackpoint-API-Token` → `BLACKPOINT_API_TOKEN`
+- `X-Blackpoint-API-Token` → API token
+- `X-Blackpoint-Base-Url` → base URL for that request (normalized the same way as `BLACKPOINT_BASE_URL`). When the header is absent, the process environment is not used.
 
 This enables per-request authentication for multi-tenant gateways.
 
@@ -95,15 +96,17 @@ await tools.call("blackpoint_status");
 // Navigate to assets domain
 await tools.call("blackpoint_navigate", { domain: "assets" });
 
-// List endpoint assets
+// List device assets for one tenant (tenantId is sent as x-tenant-id)
 await tools.call("blackpoint_assets_list", { 
-  class: "endpoint",
+  class: "DEVICE",
+  tenantId: "tenant_123",
   pageSize: 10 
 });
 
 // Get specific asset details
 await tools.call("blackpoint_assets_get", { 
-  id: "asset_12345" 
+  id: "asset_12345",
+  tenantId: "tenant_123"
 });
 
 // Return to navigation
@@ -118,7 +121,7 @@ await tools.call("blackpoint_back");
 |--------|-------|-------------|
 | **tenants** | `list`, `get` | Customer tenant management |
 | **assets** | `list`, `get`, `relationships`, `search` | Asset inventory and relationships |
-| **detections** | `list`, `get` | Security detections and telemetry |
+| **detections** | `list`, `get` | Alert groups (`GET /alert-groups`, skip/take, status OPEN or RESOLVED). Tool names are unchanged. |
 | **vulnerabilities** | `list`, `scans_list`, `darkweb_list`, `external_list` | Vuln management, dark web, external exposure |
 
 ### 📋 Planned
@@ -154,16 +157,18 @@ The server provides structured error responses:
 ```
 
 Common error scenarios:
-- **Authentication**: Invalid or expired API token
+- **401 / 403**: The API key is invalid, or the account is not entitled to that resource
+- **404**: The base URL or path is wrong (the live API is `https://api.blackpointcyber.com/v1`)
 - **Rate Limiting**: Automatic retry with exponential backoff
-- **Not Found**: Requested resource doesn't exist
-- **Validation**: Invalid parameters or missing required fields
+- **Validation**: Invalid parameters or missing required fields (`class`, `tenantId`)
+
+Failures are logged with HTTP status, method, path, and response body. The bearer token is redacted.
 
 ## Rate Limiting
 
 The underlying SDK implements automatic rate limiting:
 
-- **Default**: 60 requests per minute (1 per second)
+- **Default**: 2000 requests per 15 minutes per API key
 - **429 Handling**: Honors `Retry-After` headers
 - **Backoff**: Exponential backoff for subsequent requests
 
