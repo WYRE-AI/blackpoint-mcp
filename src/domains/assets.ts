@@ -8,7 +8,7 @@ import {
 } from '@wyre-ai/node-blackpoint';
 import type { DomainHandler, CallToolResult, RequestHandlerExtra } from '../utils/types.js';
 import { getClient } from '../utils/client.js';
-import { formatPagination, pageItems } from '../utils/format-pagination.js';
+import { formatPagination, pageItems, type PaginationLike } from '../utils/format-pagination.js';
 import { toolFailure } from '../utils/service-error.js';
 
 const ASSET_CLASS_ENUM = [...ASSET_CLASSES];
@@ -252,23 +252,13 @@ async function handleCall(
       const searchClasses = (classes && classes.length > 0 ? classes : ASSET_CLASS_ENUM) as AssetClass[];
 
       try {
-        const allResults: Array<{
-          id: string;
-          displayName?: string;
-          name?: string;
-          assetClass?: string;
-          tenantId?: string;
-        }> = [];
-
-        for (const assetClass of searchClasses) {
-          const response = await client.assets.list({
-            class: assetClass,
-            search: query,
-            tenantId,
-          });
-          const { items } = pageItems(response);
-          allResults.push(...items);
-        }
+        const perClass = await mapWithConcurrency(searchClasses, SEARCH_CONCURRENCY, assetClass =>
+          searchAssetClass(client, assetClass, query, tenantId)
+        );
+        const allResults: SearchHit[] = perClass.flatMap(result => result.items);
+        const truncated = perClass
+          .map((result, i) => ({ ...result, assetClass: searchClasses[i] }))
+          .filter(result => result.truncated);
 
         const filteredResults = tenantIds
           ? allResults.filter(asset => asset.tenantId !== undefined && tenantIds.includes(asset.tenantId))
@@ -277,6 +267,20 @@ async function handleCall(
         const resultText = [
           `Search results for "${query}":`,
           `Found ${filteredResults.length} assets across ${searchClasses.join(', ')} classes`,
+          ...(truncated.length > 0
+            ? [
+                `Results truncated: stopped after ${SEARCH_MAX_PAGES * SEARCH_PAGE_SIZE} assets per class for ` +
+                  truncated
+                    .map(
+                      result =>
+                        result.totalCount !== undefined
+                          ? `${result.assetClass} (${result.totalCount} matches)`
+                          : result.assetClass
+                    )
+                    .join(', ') +
+                  '. Narrow the query or search fewer classes to see the rest.',
+              ]
+            : []),
           '',
           ...filteredResults.map(
             asset =>
@@ -299,6 +303,89 @@ async function handleCall(
         isError: true,
       };
   }
+}
+
+interface SearchHit {
+  id: string;
+  displayName?: string;
+  name?: string;
+  assetClass?: string;
+  tenantId?: string;
+}
+
+/** Largest page the asset list route accepts (matches the list tool's schema). */
+export const SEARCH_PAGE_SIZE = 100;
+/** Pages fetched per class before the search reports truncation. */
+export const SEARCH_MAX_PAGES = 5;
+/**
+ * Classes searched at once. The SDK's token bucket still meters every call
+ * against the key quota; this only bounds how many are in flight.
+ */
+export const SEARCH_CONCURRENCY = 3;
+
+type AssetsClient = Awaited<ReturnType<typeof getClient>>;
+
+/**
+ * Page through one class until the API reports no more results or
+ * SEARCH_MAX_PAGES is reached. `truncated` is true when results remain.
+ */
+async function searchAssetClass(
+  client: AssetsClient,
+  assetClass: AssetClass,
+  query: string,
+  tenantId: string
+): Promise<{ items: SearchHit[]; truncated: boolean; totalCount?: number }> {
+  const items: SearchHit[] = [];
+  let totalCount: number | undefined;
+  for (let page = 1; page <= SEARCH_MAX_PAGES; page++) {
+    const response = await client.assets.list({
+      class: assetClass,
+      search: query,
+      tenantId,
+      page,
+      pageSize: SEARCH_PAGE_SIZE,
+    });
+    const { items: pageHits, pagination } = pageItems(response);
+    items.push(...pageHits);
+    if (pagination?.totalCount !== undefined) totalCount = pagination.totalCount;
+
+    const more = hasMorePages(pagination, page, pageHits.length, items.length);
+    if (!more) return { items, truncated: false, totalCount };
+    if (page === SEARCH_MAX_PAGES) return { items, truncated: true, totalCount };
+  }
+  return { items, truncated: false, totalCount };
+}
+
+function hasMorePages(
+  pagination: (PaginationLike & { hasNext?: boolean }) | null,
+  page: number,
+  pageLength: number,
+  fetched: number
+): boolean {
+  if (pageLength === 0) return false;
+  if (pagination?.hasNext !== undefined) return pagination.hasNext;
+  if (pagination?.totalPages !== undefined) return page < pagination.totalPages;
+  if (pagination?.totalCount !== undefined) return fetched < pagination.totalCount;
+  // No metadata: a full page means there may be another one.
+  return pageLength >= SEARCH_PAGE_SIZE;
+}
+
+/** Run `fn` over `inputs` with at most `limit` in flight; results keep input order. */
+async function mapWithConcurrency<T, R>(
+  inputs: readonly T[],
+  limit: number,
+  fn: (input: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(inputs.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < inputs.length) {
+      const i = next++;
+      results[i] = await fn(inputs[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, inputs.length) }, worker));
+  return results;
 }
 
 export const assetsHandler: DomainHandler = { getTools, handleCall };

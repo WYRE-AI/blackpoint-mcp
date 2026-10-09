@@ -35,6 +35,7 @@ export function failureContext(
 /**
  * Tool-facing text. 401/403 means the key is bad or the account is not
  * entitled. 404 means the base URL or path does not exist on the live API.
+ * Other statuses report only the status and method/path, never the body.
  */
 export function toolFailureText(action: string, error: unknown): string {
   if (error instanceof ServiceError) {
@@ -46,11 +47,9 @@ export function toolFailureText(action: string, error: unknown): string {
     if (error.status === 404) {
       return `${action}: CompassOne returned HTTP 404${where}. The base URL or path is wrong; the live API is ${LIVE_BASE_URL}.`;
     }
-    const body =
-      error.body === undefined || error.body === null || error.body === ''
-        ? ''
-        : ` Body: ${JSON.stringify(error.body)}`;
-    return `${action}: HTTP ${error.status}${where}.${body}`;
+    // The vendor body stays in the server log (logServiceFailure) only; it can
+    // carry internal detail, so it is never echoed to the MCP client.
+    return `${action}: HTTP ${error.status}${where}.`;
   }
 
   const detail = error instanceof Error ? error.message : String(error);
