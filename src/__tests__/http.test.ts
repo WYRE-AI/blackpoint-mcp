@@ -93,6 +93,102 @@ describe('handleHttpRequest — S2S wiring integration', () => {
       const body = (await res.json()) as { status: string };
       expect(body.status).toBe('ok');
     });
+
+    it('rejects a malformed X-Gateway-S2S header with 401', async () => {
+      const { handleHttpRequest } = await import('../http.js');
+      const req = new Request('http://localhost/mcp', {
+        method: 'POST',
+        headers: { 'x-gateway-s2s': 'not-a-valid-header' },
+      });
+      const res = await handleHttpRequest(req);
+
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toMatch(/Missing or invalid X-Gateway-S2S header/);
+    });
+
+    it('gateway mode with no credential headers returns 401 after a valid S2S header', async () => {
+      process.env.AUTH_MODE = 'gateway';
+      const { handleHttpRequest } = await import('../http.js');
+      const now = Math.floor(Date.now() / 1000);
+      const req = new Request('http://localhost/mcp', {
+        method: 'POST',
+        headers: { 'x-gateway-s2s': mintHeader(BLACKPOINT_SUBKEY, now) },
+      });
+      const res = await handleHttpRequest(req);
+
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as {
+        jsonrpc: string;
+        error: { code: number; message: string };
+      };
+      expect(body.error.code).toBe(-32001);
+      expect(body.error.message).toMatch(/missing required gateway credential header/);
+    });
+
+    it('accepts a valid S2S header plus gateway credential headers', async () => {
+      process.env.AUTH_MODE = 'gateway';
+      const { handleHttpRequest } = await import('../http.js');
+      const now = Math.floor(Date.now() / 1000);
+      const req = new Request('http://localhost/mcp', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          'x-gateway-s2s': mintHeader(BLACKPOINT_SUBKEY, now),
+          'x-blackpoint-api-token': 'tenant-token',
+          'x-blackpoint-base-url': 'https://api.blackpointcyber.com/v1',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            clientInfo: { name: 'http-test', version: '0.0.0' },
+          },
+        }),
+      });
+      const res = await handleHttpRequest(req);
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        jsonrpc: string;
+        error?: unknown;
+        result?: { serverInfo?: { name?: string } };
+      };
+      expect(body.jsonrpc).toBe('2.0');
+      expect(body.error).toBeUndefined();
+      expect(body.result?.serverInfo?.name).toBe('blackpoint-mcp');
+      const text = JSON.stringify(body);
+      expect(text).not.toContain(BLACKPOINT_SUBKEY);
+      expect(text).not.toContain('tenant-token');
+    });
+
+    it('GET / and /healthz stay unauthenticated and do not echo credentials', async () => {
+      process.env.AUTH_MODE = 'gateway';
+      process.env.BLACKPOINT_API_TOKEN = 'env-token-should-not-appear';
+      const { handleHttpRequest } = await import('../http.js');
+
+      for (const url of ['http://localhost/', 'http://localhost/health', 'http://localhost/healthz']) {
+        const res = await handleHttpRequest(
+          new Request(url, {
+            method: 'GET',
+            headers: {
+              'x-blackpoint-api-token': 'header-token-should-not-appear',
+              'x-gateway-s2s': 'ignored',
+            },
+          })
+        );
+        expect(res.status).toBe(200);
+        const text = await res.text();
+        expect(text).toBe('{"status":"ok"}');
+        expect(text).not.toContain('env-token-should-not-appear');
+        expect(text).not.toContain('header-token-should-not-appear');
+        expect(text).not.toContain(BLACKPOINT_SUBKEY);
+      }
+    });
   });
 
   describe('S2S enforcement disabled (CONDUIT_S2S_SECRET unset — dark-by-default)', () => {

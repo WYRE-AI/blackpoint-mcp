@@ -49,21 +49,28 @@ npm install blackpoint-mcp
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `BLACKPOINT_API_TOKEN` | CompassOne API token | Yes |
+| `BLACKPOINT_API_TOKEN` | CompassOne API token | Yes for stdio |
 | `BLACKPOINT_BASE_URL` | API base URL. Defaults to `https://api.blackpointcyber.com/v1`. A value with or without `/v1`, or the legacy `api.compassone.blackpointcyber.com` host, is normalized to that URL. Other hosts keep their origin and gain a single `/v1` suffix. | No |
 | `MCP_TRANSPORT` | Transport mode: `stdio` or `http` | No (default: stdio) |
 | `MCP_HTTP_PORT` | HTTP port for gateway mode | No (default: 8080) |
+| `MCP_HTTP_HOST` | HTTP bind address. Unset binds to `127.0.0.1`. The container image sets `0.0.0.0`. | No (default: `127.0.0.1`) |
+| `CONDUIT_S2S_SECRET` | Service-to-service secret for HTTP. `/mcp` requires a valid `X-Gateway-S2S` header. The HTTP server exits non-zero when this is empty. | Yes for HTTP |
+| `MCP_ALLOW_INSECURE_DEV` | Set to `1` to start HTTP without `CONDUIT_S2S_SECRET`. Logs a warning and skips S2S checks. Local development only. | No |
 | `AUTH_MODE` | Set to `gateway` for header-based auth | No |
 | `LOG_LEVEL` | Logging level: debug, info, warn, error | No (default: info) |
 
 ### Gateway Mode
 
-When `AUTH_MODE=gateway`, the server reads credentials from HTTP headers:
+When `AUTH_MODE=gateway`, the server reads credentials from HTTP headers and does not fall back to `process.env`:
 
-- `X-Blackpoint-API-Token` → API token
+- `X-Blackpoint-API-Token` → API token (required; missing header is HTTP 401)
 - `X-Blackpoint-Base-Url` → base URL for that request (normalized the same way as `BLACKPOINT_BASE_URL`). When the header is absent, the process environment is not used.
 
 This enables per-request authentication for multi-tenant gateways.
+
+HTTP also requires `CONDUIT_S2S_SECRET`. Every `/mcp` request must carry a valid `X-Gateway-S2S` header for that secret. A missing or invalid header is HTTP 401, before vendor credentials are read. If `CONDUIT_S2S_SECRET` is empty, the process logs an error and exits non-zero instead of serving `/mcp`. `MCP_ALLOW_INSECURE_DEV=1` starts anyway and logs a warning; do not use it outside local development. The secret is never written to logs.
+
+`GET /`, `GET /health`, and `GET /healthz` stay unauthenticated liveness checks and do not read credentials. The stdio transport does not use the S2S secret.
 
 ## Usage
 
@@ -83,6 +90,18 @@ blackpoint-mcp
 export AUTH_MODE=gateway
 export MCP_TRANSPORT=http
 export MCP_HTTP_PORT=8080
+export CONDUIT_S2S_SECRET="your-s2s-secret"
+# Optional. Unset binds to 127.0.0.1.
+# export MCP_HTTP_HOST=127.0.0.1
+
+blackpoint-mcp
+```
+
+Local development without a secret (insecure; logs a warning):
+
+```bash
+export MCP_TRANSPORT=http
+export MCP_ALLOW_INSECURE_DEV=1
 
 blackpoint-mcp
 ```
@@ -178,11 +197,13 @@ The underlying SDK implements automatic rate limiting:
 # Build
 docker build -t blackpoint-mcp .
 
-# Run in gateway mode
-docker run -p 8080:8080 \
+# Run in gateway mode. The image sets MCP_HTTP_HOST=0.0.0.0 and refuses to
+# start until CONDUIT_S2S_SECRET is set. Publish the port on loopback.
+docker run -p 127.0.0.1:8080:8080 \
   -e AUTH_MODE=gateway \
   -e MCP_TRANSPORT=http \
   -e MCP_HTTP_PORT=8080 \
+  -e CONDUIT_S2S_SECRET="$CONDUIT_S2S_SECRET" \
   blackpoint-mcp
 ```
 
@@ -235,8 +256,9 @@ These use the `elicitConfirmation` pattern to prevent accidental execution.
 
 **Gateway mode not working**:
 - Verify `AUTH_MODE=gateway` is set
-- Check HTTP headers are passed correctly
-- Confirm container networking allows connections
+- Verify `CONDUIT_S2S_SECRET` is set (HTTP exits if it is empty, unless `MCP_ALLOW_INSECURE_DEV=1`)
+- Check `X-Gateway-S2S` and `X-Blackpoint-API-Token` are passed
+- Confirm the client can reach the bind address (`127.0.0.1` by default)
 
 **Rate limiting**:
 - Monitor logs for 429 responses
@@ -252,12 +274,23 @@ blackpoint-mcp
 
 ### Health Check
 
+`GET /`, `GET /health`, and `GET /healthz` are unauthenticated and do not read credentials:
+
 ```bash
-# Test basic connectivity
-curl -X POST http://localhost:8080/ \
+curl -f http://127.0.0.1:8080/health
+```
+
+### Authenticated MCP call
+
+`/mcp` requires `X-Gateway-S2S` when `CONDUIT_S2S_SECRET` is set. In gateway mode it also requires `X-Blackpoint-API-Token`:
+
+```bash
+curl -X POST http://127.0.0.1:8080/mcp \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "X-Gateway-S2S: <gateway-signed header>" \
   -H "X-Blackpoint-API-Token: your-token" \
-  -d '{"jsonrpc": "2.0", "method": "tools/list", "id": 1}'
+  -d '{"jsonrpc": "2.0", "method": "initialize", "id": 1, "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "curl", "version": "0.0.0"}}}'
 ```
 
 ## Contributing

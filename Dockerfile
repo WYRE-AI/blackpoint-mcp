@@ -30,6 +30,9 @@ ENV NODE_ENV=production
 ENV AUTH_MODE=gateway
 ENV MCP_TRANSPORT=http
 ENV MCP_HTTP_PORT=8080
+# Listen on all container interfaces. Startup still refuses to run unless
+# CONDUIT_S2S_SECRET is set; do not publish this port beyond the host loopback.
+ENV MCP_HTTP_HOST=0.0.0.0
 
 # Create non-root user
 RUN addgroup -g 1001 -S mcp && adduser -u 1001 -S mcp -G mcp

@@ -4,6 +4,12 @@ import { logger } from './utils/logger.js';
 import { runStdioServer } from './server.js';
 import { handleHttpRequest } from './http.js';
 import { toWebRequest } from './http-request.js';
+import {
+  evaluateHttpStartup,
+  resolveHttpBindHost,
+  HTTP_S2S_MISSING_ERROR,
+  HTTP_S2S_INSECURE_DEV_WARNING,
+} from './http-startup.js';
 
 function serializeError(error: unknown): Record<string, unknown> {
   if (error instanceof Error) {
@@ -18,9 +24,20 @@ const port = parseInt(process.env.MCP_HTTP_PORT || '8080', 10);
 async function main(): Promise<void> {
   try {
     if (transport === 'http') {
+      const startup = evaluateHttpStartup();
+      if (!startup.allow) {
+        logger.error(HTTP_S2S_MISSING_ERROR);
+        process.exit(1);
+      }
+      if (startup.insecureDev) {
+        // logger.warn is dropped when LOG_LEVEL=error. This line must stay visible.
+        console.error(HTTP_S2S_INSECURE_DEV_WARNING);
+      }
+
+      const host = resolveHttpBindHost();
       const { createServer } = await import('http');
 
-      logger.info('Starting HTTP server', { port });
+      logger.info('Starting HTTP server', { port, host });
 
       const server = createServer(async (req, res) => {
         try {
@@ -42,8 +59,12 @@ async function main(): Promise<void> {
         }
       });
 
-      server.listen(port, () => {
-        logger.info('Blackpoint MCP server listening on HTTP', { port, url: `http://localhost:${port}` });
+      server.listen(port, host, () => {
+        logger.info('Blackpoint MCP server listening on HTTP', {
+          port,
+          host,
+          url: `http://${host}:${port}`,
+        });
       });
 
       // Keep the server running

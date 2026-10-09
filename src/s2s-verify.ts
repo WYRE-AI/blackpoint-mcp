@@ -14,10 +14,10 @@
  * here. This function doesn't need to know that; it just checks whatever
  * secret it's handed.
  *
- * Empty secret => always returns false. The caller is expected to treat an
- * empty CONDUIT_S2S_SECRET as "S2S enforcement disabled" (dark-by-default,
- * matches the dormant/pre-provisioning state) rather than calling this at
- * all — see the enforcement check in http.ts. NOTE for this repo
+ * Empty secret => always returns false. HTTP startup refuses to listen
+ * when CONDUIT_S2S_SECRET is empty unless MCP_ALLOW_INSECURE_DEV=1
+ * (src/http-startup.ts). The request handler skips this check only on that
+ * empty-secret path — see the enforcement check in http.ts. NOTE for this repo
  * specifically: this container reads headers from a Fetch API `Request`
  * object (via `request.headers.get(...)`, returning `string | null`), not
  * Node's `IncomingMessage.headers`. Convert null to undefined at the call

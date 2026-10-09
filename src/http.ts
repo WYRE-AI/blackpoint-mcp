@@ -6,15 +6,24 @@ import { verifyS2sHeader, S2S_HEADER } from './s2s-verify.js';
 import { normalizeBlackpointBaseUrl } from './utils/base-url.js';
 
 // Conduit service-to-service auth (gateway#377 parity). Non-empty =
-// enforce X-Gateway-S2S on every /mcp request; empty = disabled, behavior
-// exactly as before (dark-by-default until the gateway provisions this
-// container's derived subkey). See src/s2s-verify.ts.
+// enforce X-Gateway-S2S on every authenticated route. An empty secret
+// skips the check here so MCP_ALLOW_INSECURE_DEV=1 can still serve local
+// traffic; process startup refuses to listen in that case unless the dev
+// flag is set (src/http-startup.ts). See src/s2s-verify.ts.
 const S2S_SECRET = process.env.CONDUIT_S2S_SECRET || '';
 
+function isUnauthenticatedHealth(req: Request, pathname: string): boolean {
+  // Liveness probes must not read credential headers or process.env secrets.
+  if (pathname === '/health' || pathname === '/healthz') return true;
+  // The image HEALTHCHECK is `GET /`. Other methods on `/` stay on the MCP route.
+  return pathname === '/' && (req.method === 'GET' || req.method === 'HEAD');
+}
+
 export async function handleHttpRequest(req: Request): Promise<Response> {
-  // Unauthenticated shallow health check for the Azure liveness probe.
+  // Unauthenticated shallow health check for the Azure liveness probe and
+  // the image HEALTHCHECK. Returns before S2S or vendor-credential reads.
   const { pathname } = new URL(req.url);
-  if (pathname === '/health' || pathname === '/healthz') {
+  if (isUnauthenticatedHealth(req, pathname)) {
     return new Response(JSON.stringify({ status: 'ok' }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
