@@ -26,7 +26,7 @@
         },
         {
           "name": "BLACKPOINT_BASE_URL",
-          "description": "Blackpoint API base URL (region-specific). Optional \u2014 defaults to the production US endpoint.",
+          "description": "Blackpoint API base URL. Optional. Defaults to https://api.blackpointcyber.com/v1. A value with or without /v1, or the legacy api.compassone.blackpointcyber.com host, is normalized to that URL. Other hosts keep their origin and gain a single /v1 suffix.",
           "isRequired": false,
           "format": "string"
         },

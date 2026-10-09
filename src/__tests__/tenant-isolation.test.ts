@@ -7,17 +7,23 @@ const { constructions } = vi.hoisted(() => ({
   constructions: [] as Array<{ apiToken: string; baseUrl?: string }>,
 }));
 
-vi.mock('@wyre-technology/node-blackpoint', () => ({
-  CompassOneClient: class {
-    apiToken: string;
-    baseUrl?: string;
-    constructor(config: { apiToken: string; baseUrl?: string }) {
-      this.apiToken = config.apiToken;
-      this.baseUrl = config.baseUrl;
-      constructions.push({ apiToken: config.apiToken, baseUrl: config.baseUrl });
-    }
-  },
-}));
+vi.mock('@wyre-ai/node-blackpoint', async () => {
+  const actual = await vi.importActual<typeof import('@wyre-ai/node-blackpoint')>(
+    '@wyre-ai/node-blackpoint'
+  );
+  return {
+    ...actual,
+    CompassOneClient: class {
+      apiToken: string;
+      baseUrl?: string;
+      constructor(config: { apiToken: string; baseUrl?: string }) {
+        this.apiToken = config.apiToken;
+        this.baseUrl = config.baseUrl;
+        constructions.push({ apiToken: config.apiToken, baseUrl: config.baseUrl });
+      }
+    },
+  };
+});
 
 import { requestContext, freshNavigationState, getRequestContext } from '../utils/request-context.js';
 import { getClient } from '../utils/client.js';
@@ -119,6 +125,24 @@ describe('tenant isolation via per-request context', () => {
 
       expect(client.apiToken).toBe('env-token');
       expect(client.baseUrl).toBe('https://env.example/v1');
+    });
+
+    it('normalizes a legacy CompassOne env base URL onto the live v1 host', async () => {
+      process.env.BLACKPOINT_API_TOKEN = 'env-token';
+      process.env.BLACKPOINT_BASE_URL = 'https://api.compassone.blackpointcyber.com';
+
+      const client = (await getClient()) as unknown as { baseUrl?: string };
+
+      expect(client.baseUrl).toBe('https://api.blackpointcyber.com/v1');
+    });
+
+    it('appends /v1 when the env base URL omits it and does not double it', async () => {
+      process.env.BLACKPOINT_API_TOKEN = 'env-token';
+      process.env.BLACKPOINT_BASE_URL = 'https://api.blackpointcyber.com';
+
+      const client = (await getClient()) as unknown as { baseUrl?: string };
+
+      expect(client.baseUrl).toBe('https://api.blackpointcyber.com/v1');
     });
 
     it('threads the per-request base URL into the client', async () => {

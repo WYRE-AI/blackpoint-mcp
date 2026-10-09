@@ -103,7 +103,7 @@ async function handleCall(
         tenants: 'Customer tenants and configuration',
         assets: 'Endpoint and server inventory',
         alerts: 'Security alerts and alert groups (placeholder - API not yet available)',
-        detections: 'Security detections and telemetry',
+        detections: 'Alert groups (OPEN/RESOLVED), listed from GET /alert-groups',
         tickets: 'Incident tickets and workflow (placeholder - API not yet available)',
         cloud_security: 'Cloud MDR (M365, Google, Cisco onboarding)',
         vulnerabilities: 'Vulnerability scans, dark web monitoring, external exposure',
