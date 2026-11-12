@@ -49,6 +49,9 @@ LABEL org.opencontainers.image.version="0.1.0"
 LABEL io.modelcontextprotocol.server.name="io.github.WYRE-AI/blackpoint-mcp"
 
 # Switch to non-root user
+# The runtime only executes node; drop the bundled npm CLI (and its CVE-prone deps)
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+
 USER mcp
 
 # Expose HTTP port
