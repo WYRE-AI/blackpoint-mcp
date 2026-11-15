@@ -7,6 +7,20 @@ export interface PaginationLike {
   take?: number;
 }
 
+/** Wire shapes returned by CompassOne list routes (and SDK-normalized forms). */
+export interface PageResponseLike<T> {
+  data?: T[];
+  /** Live alert-groups / take-skip routes return `items` instead of `data`. */
+  items?: T[];
+  pagination?: PaginationLike | null;
+  /** Take/skip route totals (alert-groups). */
+  total?: number;
+  start?: number;
+  end?: number;
+  skip?: number;
+  take?: number;
+}
+
 /**
  * Format pagination copied off CompassOne's `meta` object.
  * Page metadata (`currentPage` / `totalPages`) wins when the SDK mapped it
@@ -34,15 +48,39 @@ export function formatPagination(pagination: PaginationLike | null | undefined):
   return '';
 }
 
-export function pageItems<T>(response: T[] | { data?: T[]; pagination?: PaginationLike | null } | null | undefined): {
+export function pageItems<T>(response: T[] | PageResponseLike<T> | null | undefined): {
   items: T[];
   pagination: PaginationLike | null;
 } {
   if (Array.isArray(response)) {
     return { items: response, pagination: null };
   }
-  return {
-    items: response?.data ?? [],
-    pagination: response?.pagination ?? null,
-  };
+  if (!response) {
+    return { items: [], pagination: null };
+  }
+
+  const items = response.data ?? response.items ?? [];
+
+  if (response.pagination) {
+    return { items, pagination: response.pagination };
+  }
+
+  const hasTakeSkipFields =
+    response.total !== undefined ||
+    response.start !== undefined ||
+    response.skip !== undefined ||
+    response.take !== undefined;
+
+  if (hasTakeSkipFields) {
+    return {
+      items,
+      pagination: {
+        totalCount: response.total,
+        skip: response.skip ?? response.start,
+        take: response.take,
+      },
+    };
+  }
+
+  return { items, pagination: null };
 }

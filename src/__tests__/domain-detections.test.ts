@@ -48,19 +48,24 @@ describe('detectionsHandler', () => {
   });
 
   describe('blackpoint_detections_list', () => {
-    it('calls alert groups with skip/take and status and formats meta pagination', async () => {
+    it('reads live {items, total, start, end} pages and formats skip/take pagination', async () => {
       const list = vi.fn().mockResolvedValue({
-        data: [
+        items: [
           {
             id: 'ag-1',
-            hostname: 'host-a',
             status: 'OPEN',
             alertCount: 2,
             alertTypes: ['CR'],
-            username: 'ada',
+            riskScore: 42,
+            created: '2026-01-01T00:00:00Z',
+            alert: { hostname: 'host-a', username: 'ada' },
+            ticket: { status: 'OPEN' },
           },
         ],
-        pagination: { skip: 0, take: 50, totalCount: 80 },
+        total: 80,
+        start: 0,
+        end: 50,
+        take: 50,
       });
       getClient.mockResolvedValue({ alertGroups: { list } });
 
@@ -83,7 +88,36 @@ describe('detectionsHandler', () => {
       });
       expect(result.isError).toBeFalsy();
       expect(text(result)).toMatch(/Found 1 alert groups \(skip 0, take 50 of 80\)/);
-      expect(text(result)).toMatch(/host-a \(ag-1\) - Status: OPEN - Alerts: 2 - Types: CR - User: ada/);
+      expect(text(result)).not.toMatch(/Found 0 alert groups/);
+      expect(text(result)).toMatch(
+        /host-a \(ag-1\) - Status: OPEN - Alerts: 2 - Types: CR - User: ada - Risk: 42 - Ticket: OPEN - Created: 2026-01-01T00:00:00Z/
+      );
+    });
+
+    it('still accepts legacy {data, pagination} responses', async () => {
+      const list = vi.fn().mockResolvedValue({
+        data: [
+          {
+            id: 'ag-legacy',
+            hostname: 'host-legacy',
+            status: 'RESOLVED',
+            alertCount: 1,
+            username: 'bob',
+          },
+        ],
+        pagination: { skip: 10, take: 25, totalCount: 40 },
+      });
+      getClient.mockResolvedValue({ alertGroups: { list } });
+
+      const result = await detectionsHandler.handleCall('blackpoint_detections_list', {
+        tenantId: 't1',
+        skip: 10,
+        take: 25,
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect(text(result)).toMatch(/Found 1 alert groups \(skip 10, take 25 of 40\)/);
+      expect(text(result)).toMatch(/host-legacy \(ag-legacy\)/);
     });
 
     it('rejects legacy detection statuses instead of sending them', async () => {
@@ -156,6 +190,8 @@ describe('detectionsHandler', () => {
         alertTypes: ['MDR'],
         username: 'ada',
         type: 'MDR',
+        riskScore: 9,
+        ticket: { status: 'CLOSED' },
         tenantId: 't1',
         created: '2026-01-01',
       });
@@ -171,6 +207,27 @@ describe('detectionsHandler', () => {
       expect(text(result)).toMatch(/Status: OPEN/);
       expect(text(result)).toMatch(/Types: MDR/);
       expect(text(result)).toMatch(/User: ada/);
+      expect(text(result)).toMatch(/Risk: 9/);
+      expect(text(result)).toMatch(/Ticket: CLOSED/);
+      expect(text(result)).toMatch(/Created: 2026-01-01/);
+    });
+
+    it('falls back to nested alert hostname and username', async () => {
+      const get = vi.fn().mockResolvedValue({
+        id: 'ag-nested',
+        status: 'OPEN',
+        alert: { hostname: 'nested-host', username: 'nested-user' },
+      });
+      getClient.mockResolvedValue({ alertGroups: { get } });
+
+      const result = await detectionsHandler.handleCall('blackpoint_detections_get', {
+        id: 'ag-nested',
+        tenantId: 't1',
+      });
+
+      expect(text(result)).toMatch(/Alert group: nested-host \(ag-nested\)/);
+      expect(text(result)).toMatch(/Host: nested-host/);
+      expect(text(result)).toMatch(/User: nested-user/);
     });
 
     it('omits optional lines when the fields are absent', async () => {
@@ -184,6 +241,8 @@ describe('detectionsHandler', () => {
 
       expect(text(result)).not.toMatch(/Types:/);
       expect(text(result)).not.toMatch(/User:/);
+      expect(text(result)).not.toMatch(/Risk:/);
+      expect(text(result)).not.toMatch(/Ticket:/);
     });
 
     it('says a 404 is a wrong base URL or path', async () => {
