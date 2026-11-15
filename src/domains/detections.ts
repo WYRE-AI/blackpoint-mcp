@@ -11,6 +11,13 @@ import { toolFailure } from '../utils/service-error.js';
 
 const ALERT_GROUP_STATUSES = ['OPEN', 'RESOLVED'] as const;
 
+/** Live CompassOne alert groups nest host/user under `alert` and expose risk/ticket. */
+type AlertGroupView = AlertGroup & {
+  riskScore?: number;
+  alert?: { hostname?: string; username?: string } | null;
+  ticket?: { status?: string; created?: string } | null;
+};
+
 function readStatus(value: unknown): AlertGroupStatus | AlertGroupStatus[] | undefined {
   if (value === undefined || value === null) return undefined;
   const values = (Array.isArray(value) ? value : [value]).map(item => String(item));
@@ -23,16 +30,21 @@ function readStatus(value: unknown): AlertGroupStatus | AlertGroupStatus[] | und
   return statuses.length === 1 ? statuses[0] : statuses;
 }
 
-function formatAlertGroupLine(group: AlertGroup): string {
-  const title = group.hostname || group.id;
+function formatAlertGroupLine(group: AlertGroupView): string {
+  const hostname = group.hostname || group.alert?.hostname;
+  const username = group.username || group.alert?.username;
+  const title = hostname || group.id;
   const types = group.alertTypes?.length ? ` - Types: ${group.alertTypes.join(', ')}` : '';
   return (
     `• ${title} (${group.id})` +
     (group.status ? ` - Status: ${group.status}` : '') +
     (group.alertCount !== undefined ? ` - Alerts: ${group.alertCount}` : '') +
     types +
-    (group.username ? ` - User: ${group.username}` : '') +
-    (group.type ? ` - Type: ${group.type}` : '')
+    (username ? ` - User: ${username}` : '') +
+    (group.type ? ` - Type: ${group.type}` : '') +
+    (group.riskScore !== undefined ? ` - Risk: ${group.riskScore}` : '') +
+    (group.ticket?.status ? ` - Ticket: ${group.ticket.status}` : '') +
+    (group.created ? ` - Created: ${group.created}` : '')
   );
 }
 
@@ -140,17 +152,21 @@ async function handleCall(
       const tenantId = args.tenantId as string;
 
       try {
-        const group = await client.alertGroups.get(id, { tenantId });
+        const group = (await client.alertGroups.get(id, { tenantId })) as AlertGroupView;
         const types = group.alertTypes?.length ? group.alertTypes.join(', ') : null;
+        const hostname = group.hostname || group.alert?.hostname;
+        const username = group.username || group.alert?.username;
 
         const details = [
-          `Alert group: ${group.hostname || group.id} (${group.id})`,
+          `Alert group: ${hostname || group.id} (${group.id})`,
           group.status ? `Status: ${group.status}` : null,
           group.alertCount !== undefined ? `Alerts: ${group.alertCount}` : null,
           types ? `Types: ${types}` : null,
-          group.hostname ? `Host: ${group.hostname}` : null,
-          group.username ? `User: ${group.username}` : null,
+          hostname ? `Host: ${hostname}` : null,
+          username ? `User: ${username}` : null,
           group.type ? `Type: ${group.type}` : null,
+          group.riskScore !== undefined ? `Risk: ${group.riskScore}` : null,
+          group.ticket?.status ? `Ticket: ${group.ticket.status}` : null,
           group.tenantId ? `Tenant: ${group.tenantId}` : null,
           group.created ? `Created: ${group.created}` : null,
         ]

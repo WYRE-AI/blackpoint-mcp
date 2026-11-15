@@ -170,21 +170,26 @@ describe('live CompassOne calls (msw)', () => {
     expect((result.content[0] as { text: string }).text).toMatch(/In relationships for asset asset-1/);
   });
 
-  it('lists and gets alert groups with skip/take and status', async () => {
+  it('lists and gets alert groups with the live {items, total, start, end} shape', async () => {
     server.use(
       http.get(`${LIVE}/v1/alert-groups`, ({ request }) => {
         record(request);
         return HttpResponse.json({
-          data: [
+          items: [
             {
               id: 'ag-1',
               status: 'OPEN',
               alertCount: 2,
-              hostname: 'host-a',
-              username: 'ada',
+              riskScore: 12,
+              alert: { hostname: 'host-a', username: 'ada' },
+              ticket: { status: 'OPEN' },
+              created: '2026-01-01T00:00:00Z',
             },
           ],
-          meta: { skip: 10, take: 25, totalItems: 80 },
+          total: 80,
+          start: 10,
+          end: 35,
+          take: 25,
         });
       }),
       http.get(`${LIVE}/v1/alert-groups/:id`, ({ request }) => {
@@ -193,7 +198,7 @@ describe('live CompassOne calls (msw)', () => {
           id: 'ag-1',
           status: 'RESOLVED',
           alertCount: 2,
-          hostname: 'host-a',
+          alert: { hostname: 'host-a', username: 'ada' },
           tenantId: 'tenant-1',
         });
       })
@@ -211,7 +216,10 @@ describe('live CompassOne calls (msw)', () => {
     });
 
     expect(listed.isError).toBeFalsy();
-    expect((listed.content[0] as { text: string }).text).toMatch(/skip 10, take 25 of 80/);
+    const listedText = (listed.content[0] as { text: string }).text;
+    expect(listedText).toMatch(/Found 1 alert groups \(skip 10, take 25 of 80\)/);
+    expect(listedText).not.toMatch(/Found 0 alert groups/);
+    expect(listedText).toMatch(/host-a \(ag-1\)/);
     const listUrl = new URL(seen[0]!.url);
     expect(listUrl.pathname).toBe('/v1/alert-groups');
     expect(listUrl.searchParams.get('skip')).toBe('10');
@@ -221,8 +229,40 @@ describe('live CompassOne calls (msw)', () => {
     expect(seen[0]!.tenantId).toBe('tenant-1');
 
     expect(got.isError).toBeFalsy();
+    expect((got.content[0] as { text: string }).text).toMatch(/Host: host-a/);
     expect(new URL(seen[1]!.url).pathname).toBe('/v1/alert-groups/ag-1');
     expect(seen[1]!.tenantId).toBe('tenant-1');
+  });
+
+  it('still lists alert groups from a legacy {data, meta} response', async () => {
+    server.use(
+      http.get(`${LIVE}/v1/alert-groups`, ({ request }) => {
+        record(request);
+        return HttpResponse.json({
+          data: [
+            {
+              id: 'ag-legacy',
+              status: 'OPEN',
+              alertCount: 1,
+              hostname: 'legacy-host',
+              username: 'legacy-user',
+            },
+          ],
+          meta: { skip: 0, take: 25, totalItems: 3 },
+        });
+      })
+    );
+
+    const listed = await detectionsHandler.handleCall('blackpoint_detections_list', {
+      tenantId: 'tenant-1',
+      skip: 0,
+      take: 25,
+    });
+
+    expect(listed.isError).toBeFalsy();
+    const listedText = (listed.content[0] as { text: string }).text;
+    expect(listedText).toMatch(/Found 1 alert groups \(skip 0, take 25 of 3\)/);
+    expect(listedText).toMatch(/legacy-host \(ag-legacy\)/);
   });
 
   it('does not use the process env base URL when the gateway context omits the header', async () => {
